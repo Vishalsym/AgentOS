@@ -1,0 +1,1199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sentari Agent-OS — Control Dashboard</title>
+<style>
+  :root{
+    --navy:#152A54; --navy-2:#1E3A6E; --navy-3:#2A4A8C;
+    --bg:#EEF1F5; --panel:#FFFFFF; --panel-2:#F5F7FA; --border:#D7DEE6;
+    --text:#1B2430; --text-muted:#5C6B7C;
+    --ok:#1F8F5A;    --ok-soft:#E3F5EC;
+    --warn:#C97A16;  --warn-soft:#FBEBD6;
+    --danger:#C4342A;--danger-soft:#FBE2E0;
+    --ready:#2454A8; --ready-soft:#E2EAF7;
+    --dim:#6B7683;   --dim-soft:#E9ECEF;
+    --accent:#B04A1D; --accent-soft:#F3E1D4; --accent-2:#D66A32;
+    --shadow-sm:0 1px 2px rgba(16,24,40,0.05), 0 1px 3px rgba(16,24,40,0.06);
+    --shadow-md:0 4px 14px rgba(16,24,40,0.09);
+  }
+  *{ box-sizing:border-box; }
+  html{ scrollbar-color: var(--dim) var(--panel-2); }
+  body{
+    margin:0; color:var(--text);
+    background:
+      radial-gradient(1100px 480px at 12% -8%, rgba(30,58,110,0.07), transparent 60%),
+      radial-gradient(900px 420px at 100% 0%, rgba(176,74,29,0.05), transparent 55%),
+      linear-gradient(180deg, #EEF1F5 0%, #E6EBF2 100%);
+    font-family:-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  code, .mono{ font-family:"Consolas","SFMono-Regular",Menlo,monospace; }
+  button{ font-family:inherit; cursor:pointer; transition:background .15s ease, transform .1s ease, box-shadow .15s ease; }
+  input, select{ font-family:inherit; }
+  ::-webkit-scrollbar{ width:9px; height:9px; }
+  ::-webkit-scrollbar-track{ background:transparent; }
+  ::-webkit-scrollbar-thumb{ background:#B9C2CE; border-radius:99px; border:2px solid var(--panel-2); }
+  ::-webkit-scrollbar-thumb:hover{ background:#9AA6B5; }
+
+  header{
+    background:linear-gradient(120deg, var(--navy) 0%, var(--navy-2) 55%, var(--navy-3) 100%);
+    color:#fff; padding:1.1rem 1.6rem;
+    box-shadow:0 2px 16px rgba(10,16,28,0.22);
+    position:relative; overflow:hidden;
+  }
+  header::after{
+    content:""; position:absolute; inset:0; pointer-events:none;
+    background:radial-gradient(600px 200px at 90% -40%, rgba(255,255,255,0.10), transparent 70%);
+  }
+  .head-row{ display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap; position:relative; }
+  .head-row h1{ margin:0; font-size:1.32rem; letter-spacing:0.035em; font-weight:700; text-shadow:0 1px 2px rgba(0,0,0,0.15); }
+  .head-row h1 .dash{ opacity:0.55; font-weight:400; margin:0 0.45rem; }
+  .head-actions{ display:flex; gap:0.5rem; position:relative; }
+  .btn{
+    background:rgba(255,255,255,0.12); color:#fff; border:1px solid rgba(255,255,255,0.35);
+    border-radius:7px; padding:0.45rem 0.9rem; font-size:0.85rem; backdrop-filter:blur(2px);
+  }
+  .btn:hover{ background:rgba(255,255,255,0.24); transform:translateY(-1px); box-shadow:0 3px 8px rgba(0,0,0,0.18); }
+  .btn:active{ transform:translateY(0); }
+  .narration-bar{
+    margin-top:0.75rem; font-size:0.92rem; color:#DCE4F0;
+    display:flex; align-items:center; gap:0.6rem; position:relative;
+  }
+  .phase-pill{
+    font-size:0.7rem; text-transform:uppercase; letter-spacing:0.05em; font-weight:600;
+    background:rgba(255,255,255,0.16); border:1px solid rgba(255,255,255,0.22);
+    border-radius:999px; padding:0.22rem 0.65rem;
+    flex:0 0 auto;
+  }
+
+  main{ padding:1.4rem; max-width:1500px; margin:0 auto; }
+
+  /* ---- cockpit control bar ---- */
+  .cockpit{
+    background:var(--panel); border:1px solid var(--border); border-radius:12px;
+    padding:0.9rem 1.1rem; margin-bottom:1.1rem; box-shadow:var(--shadow-sm);
+    display:flex; align-items:flex-end; gap:0.8rem; flex-wrap:wrap;
+    border-top:3px solid var(--navy-3);
+  }
+  .cockpit .title{
+    font-size:0.85rem; letter-spacing:0.06em; text-transform:uppercase; color:var(--navy);
+    font-weight:700;
+    flex:0 0 100%; margin-bottom:0.15rem;
+  }
+  .field{ display:flex; flex-direction:column; gap:0.25rem; }
+  .field label{ font-size:0.72rem; color:var(--text-muted); }
+  .field input{
+    border:1px solid var(--border); border-radius:6px; padding:0.4rem 0.55rem; font-size:0.88rem;
+    width:9rem; transition:border-color .15s, box-shadow .15s;
+  }
+  .field input:focus, .action-row input:focus, select:focus, textarea:focus{
+    outline:none; border-color:var(--navy-3); box-shadow:0 0 0 3px rgba(42,74,140,0.14);
+  }
+  .field.narrow input{ width:5.5rem; }
+  .btn-primary{
+    background:linear-gradient(135deg, var(--accent-2), var(--accent));
+    color:#fff; border:1px solid var(--accent);
+    border-radius:6px; padding:0.48rem 1rem; font-size:0.88rem; font-weight:600;
+    box-shadow:0 2px 6px rgba(176,74,29,0.25);
+  }
+  .btn-primary:hover{ filter:brightness(1.08); transform:translateY(-1px); box-shadow:0 4px 10px rgba(176,74,29,0.32); }
+  .btn-primary:active{ transform:translateY(0); }
+  .cockpit .hint{ color:var(--text-muted); font-size:0.8rem; flex:0 0 100%; margin-top:0.2rem; }
+
+  .grid{
+    display:grid; grid-template-columns: 1.1fr 1.3fr 1.4fr; gap:1.1rem; align-items:start;
+  }
+  @media (max-width: 980px){ .grid{ grid-template-columns:1fr; } }
+
+  .panel{
+    background:var(--panel); border:1px solid var(--border); border-radius:12px;
+    padding:1rem 1.1rem; box-shadow:var(--shadow-sm);
+    transition:box-shadow .2s ease;
+    animation:panel-in .35s ease both;
+  }
+  .panel:hover{ box-shadow:var(--shadow-md); }
+  @keyframes panel-in{ from{ opacity:0; transform:translateY(6px); } to{ opacity:1; transform:translateY(0); } }
+  .panel h2{
+    margin:0 0 0.85rem; font-size:0.85rem; letter-spacing:0.06em; text-transform:uppercase;
+    color:var(--navy); font-weight:700; display:flex; align-items:center; gap:0.4rem;
+    padding-bottom:0.55rem; border-bottom:1px solid var(--border);
+  }
+  .col{ display:flex; flex-direction:column; gap:1.1rem; }
+
+  /* ---- agent PCB cards ---- */
+  .agent-card{
+    border:1px solid var(--border); border-left:4px solid var(--dim);
+    border-radius:8px; padding:0.7rem 0.85rem; margin-bottom:0.7rem; background:var(--panel-2);
+    cursor:pointer; transition:box-shadow .15s, transform .1s, border-color .15s;
+  }
+  .agent-card:hover{ box-shadow:0 4px 12px rgba(20,30,50,0.14); transform:translateY(-2px); border-color:#C3CEDC; }
+  .agent-card:last-child{ margin-bottom:0; }
+  .agent-card.state-RUNNING{ border-left-color:var(--ok); }
+  .agent-card.state-READY{ border-left-color:var(--ready); }
+  .agent-card.state-BLOCKED{ border-left-color:var(--warn); }
+  .agent-card.state-KILLED{ border-left-color:var(--danger); background:var(--danger-soft); }
+  .agent-card.state-TERMINATED{ border-left-color:var(--dim); background:var(--dim-soft); }
+  .agent-card .row1{ display:flex; justify-content:space-between; align-items:baseline; }
+  .agent-card .aid{ font-weight:700; font-size:0.98rem; }
+  .agent-card .meta{ font-size:0.8rem; color:var(--text-muted); margin-top:0.25rem; }
+  .agent-card .res-chips{ margin-top:0.35rem; display:flex; gap:0.3rem; flex-wrap:wrap; }
+  .chip{
+    font-family:"Consolas",Menlo,monospace; font-size:0.68rem; border-radius:4px;
+    padding:0.1rem 0.4rem;
+  }
+  .chip.held{ background:var(--ok-soft); color:var(--ok); }
+  .chip.waiting{ background:var(--warn-soft); color:var(--warn); }
+  .state-badge{
+    font-size:0.68rem; font-weight:700; letter-spacing:0.04em; text-transform:uppercase;
+    padding:0.15rem 0.5rem 0.15rem 0.4rem; border-radius:999px;
+    display:inline-flex; align-items:center; gap:0.32rem;
+  }
+  .state-badge::before{
+    content:""; width:6px; height:6px; border-radius:50%; background:currentColor; flex:0 0 auto;
+  }
+  .state-badge.state-RUNNING{ background:var(--ok-soft); color:var(--ok); }
+  .state-badge.state-READY{ background:var(--ready-soft); color:var(--ready); }
+  .state-badge.state-BLOCKED{ background:var(--warn-soft); color:var(--warn); }
+  .state-badge.state-KILLED{ background:var(--danger); color:#fff; }
+  .state-badge.state-TERMINATED{ background:var(--dim); color:#fff; }
+  .state-badge.state-NEW{ background:var(--dim-soft); color:var(--dim); }
+
+  /* ---- wait-for graph ---- */
+  .empty-note{ color:var(--text-muted); font-size:0.88rem; font-style:italic; }
+  .wait-line{
+    font-family:"Consolas","SFMono-Regular",Menlo,monospace; font-size:0.85rem;
+    background:var(--warn-soft); color:var(--warn); border-radius:6px;
+    padding:0.4rem 0.6rem; margin-bottom:0.4rem;
+  }
+  .cycle-banner{
+    background:var(--danger-soft); border:1px solid var(--danger); color:var(--danger);
+    border-radius:8px; padding:0.75rem 0.9rem; font-size:0.92rem; line-height:1.5;
+  }
+  .cycle-banner b{ font-family:"Consolas","SFMono-Regular",Menlo,monospace; }
+
+  /* ---- quota bars ---- */
+  .quota-row{ margin-bottom:0.85rem; }
+  .quota-row:last-child{ margin-bottom:0; }
+  .quota-row .qr-top{
+    display:flex; justify-content:space-between; font-size:0.82rem; margin-bottom:0.3rem;
+  }
+  .quota-row .qr-top .qa-id{ font-weight:600; }
+  .quota-row .qr-top .qa-num{ color:var(--text-muted); font-family:"Consolas",Menlo,monospace; }
+  .bar-track{
+    height:14px; background:var(--panel-2); border:1px solid var(--border);
+    border-radius:999px; overflow:hidden;
+  }
+  .bar-fill{ height:100%; border-radius:999px 0 0 999px; transition:width .35s ease; }
+  .bar-fill.state-RUNNING{ background:var(--ok); }
+  .bar-fill.state-READY{ background:var(--ready); }
+  .bar-fill.state-BLOCKED{ background:var(--warn); }
+  .bar-fill.state-KILLED{ background:var(--danger); }
+  .bar-fill.state-TERMINATED{ background:var(--dim); }
+  .bar-fill.warn-fill{ background:var(--warn) !important; }
+  .bar-fill.danger-fill{ background:var(--danger) !important; }
+
+  /* ---- syscall log ---- */
+  .log-panel{ height:100%; display:flex; flex-direction:column; }
+  #log-scroll{
+    flex:1; max-height:520px; overflow-y:auto; font-family:"Consolas","SFMono-Regular",Menlo,monospace;
+    font-size:0.82rem; background:var(--panel-2); border:1px solid var(--border); border-radius:8px;
+    padding:0.6rem 0.75rem;
+  }
+  .log-line{ padding:0.28rem 0; border-bottom:1px dashed var(--border); }
+  .log-line:last-child{ border-bottom:none; }
+  .log-line .lrow{ display:flex; gap:0.6rem; align-items:baseline; }
+  .log-line .lt{ color:var(--text-muted); flex:0 0 auto; }
+  .log-line .ls{ font-weight:700; flex:0 0 auto; min-width:5.5em; }
+  .log-line .ltext{ cursor:default; }
+  .log-line.expandable .ltext{ cursor:pointer; text-decoration:underline dotted; }
+  .log-line .ltext.ok{ color:var(--ok); }
+  .log-line .ltext.warn{ color:var(--warn); }
+  .log-line .ltext.danger{ color:var(--danger); font-weight:700; }
+  .log-line .ltext.dim{ color:var(--dim); }
+  .log-line .ltext.info{ color:var(--text); }
+  .log-args{
+    display:none; margin:0.3rem 0 0 6.3em; background:#fff; border:1px solid var(--border);
+    border-radius:5px; padding:0.35rem 0.5rem; color:var(--text-muted); white-space:pre-wrap;
+  }
+  .log-args.open{ display:block; }
+
+  footer{ text-align:center; color:var(--text-muted); font-size:0.78rem; padding:1.5rem; }
+
+  /* ---- stats strip ---- */
+  .stats-bar{
+    display:flex; gap:0.7rem; flex-wrap:wrap; margin-bottom:1.1rem;
+  }
+  .stat-chip{
+    background:var(--panel); border:1px solid var(--border); border-radius:10px;
+    padding:0.55rem 0.9rem; display:flex; flex-direction:column; gap:0.15rem; min-width:6.2rem;
+    box-shadow:var(--shadow-sm); transition:box-shadow .2s ease, transform .15s ease;
+  }
+  .stat-chip:hover{ box-shadow:var(--shadow-md); transform:translateY(-1px); }
+  .stat-chip .sc-label{ font-size:0.66rem; letter-spacing:0.06em; text-transform:uppercase; color:var(--text-muted); }
+  .stat-chip .sc-value{ font-size:1.25rem; font-weight:700; font-family:"Consolas",Menlo,monospace; line-height:1.1; }
+  .stat-chip.c-RUNNING .sc-value{ color:var(--ok); }
+  .stat-chip.c-READY .sc-value{ color:var(--ready); }
+  .stat-chip.c-BLOCKED .sc-value{ color:var(--warn); }
+  .stat-chip.c-KILLED .sc-value{ color:var(--danger); }
+  .stat-chip.c-TERMINATED .sc-value{ color:var(--dim); }
+  .stat-chip.cpu{
+    background:linear-gradient(135deg, var(--navy), var(--navy-2)); border-color:var(--navy);
+    color:#fff; min-width:9rem;
+  }
+  .stat-chip.cpu .sc-label{ color:#B9C6DE; }
+  .stat-chip.cpu .sc-value{ color:#fff; display:flex; align-items:center; gap:0.4rem; }
+  .live-dot{
+    width:8px; height:8px; border-radius:50%; background:#3CD97A; flex:0 0 auto;
+    box-shadow:0 0 0 rgba(60,217,122,0.6); animation:pulse-dot 1.4s infinite;
+  }
+  .live-dot.idle{ background:#7C8AA0; animation:none; }
+  @keyframes pulse-dot{
+    0%{ box-shadow:0 0 0 0 rgba(60,217,122,0.55); }
+    70%{ box-shadow:0 0 0 7px rgba(60,217,122,0); }
+    100%{ box-shadow:0 0 0 0 rgba(60,217,122,0); }
+  }
+  .stat-chip .sc-sub{ font-size:0.68rem; color:var(--text-muted); font-family:"Consolas",Menlo,monospace; }
+  .sparkline-chip{ min-width:9.5rem; }
+  .sparkline-chip canvas{ display:block; margin-top:0.15rem; width:100%; height:26px; }
+  .quota-chip{ min-width:11rem; }
+  .quota-chip .bar-track{ margin-top:0.25rem; height:8px; }
+  .quota-chip .bar-fill{ background:var(--accent); }
+
+  /* ---- state-change pulse on agent cards ---- */
+  @keyframes card-flash{
+    0%{ box-shadow:0 0 0 3px rgba(176,74,29,0.55); }
+    100%{ box-shadow:0 0 0 0 rgba(176,74,29,0); }
+  }
+  .agent-card.flash{ animation:card-flash 0.9s ease-out; }
+  .agent-card.is-cpu{ outline:2px solid var(--ok); outline-offset:1px; }
+  .cpu-tag{
+    font-size:0.62rem; font-weight:700; letter-spacing:0.05em; color:var(--ok);
+    background:var(--ok-soft); border-radius:4px; padding:0.05rem 0.35rem; margin-left:0.4rem;
+  }
+
+  /* ---- wait-for graph (SVG) ---- */
+  #wait-graph-svg{ width:100%; height:auto; display:block; }
+  .wfg-node-circle{ fill:var(--panel-2); stroke:var(--dim); stroke-width:1.5; }
+  .wfg-node-circle.blocked{ stroke:var(--warn); }
+  .wfg-node-circle.cycle{ stroke:var(--danger); stroke-width:2.5; }
+  .wfg-node-label{ font-size:11px; font-family:"Consolas",Menlo,monospace; fill:var(--text); }
+  .wfg-edge{ stroke:var(--warn); stroke-width:1.6; fill:none; }
+  .wfg-edge.cycle{ stroke:var(--danger); stroke-width:2.2; }
+  .wfg-edge.cycle-anim{ stroke-dasharray:5 4; animation:wfg-dash 0.7s linear infinite; }
+  @keyframes wfg-dash{ to{ stroke-dashoffset:-18; } }
+
+  /* ---- resource allocation panel ---- */
+  .resource-card{
+    border:1px solid var(--border); border-radius:8px; padding:0.55rem 0.75rem;
+    margin-bottom:0.6rem; background:var(--panel-2); transition:box-shadow .15s ease;
+  }
+  .resource-card:hover{ box-shadow:0 2px 8px rgba(20,30,50,0.1); }
+  .resource-card:last-child{ margin-bottom:0; }
+  .resource-card .rk{ font-family:"Consolas",Menlo,monospace; font-weight:700; font-size:0.86rem; }
+  .resource-card .rline{ font-size:0.8rem; margin-top:0.3rem; display:flex; gap:0.4rem; align-items:baseline; flex-wrap:wrap; }
+  .resource-card .rlabel{ color:var(--text-muted); flex:0 0 auto; }
+  .resource-card .rholder{ color:var(--ok); font-weight:600; }
+  .resource-card .rwaiters{ color:var(--warn); }
+  .resource-card .rnone{ color:var(--text-muted); font-style:italic; }
+
+  /* ---- toasts ---- */
+  #toast-stack{
+    position:fixed; top:1rem; right:1rem; z-index:40; display:flex; flex-direction:column;
+    gap:0.5rem; width:min(340px, 90vw);
+  }
+  .toast{
+    background:var(--panel); border:1px solid var(--border); border-left:4px solid var(--dim);
+    border-radius:8px; padding:0.65rem 0.85rem; box-shadow:0 6px 20px rgba(10,16,28,0.18);
+    font-size:0.85rem; line-height:1.4; animation:toast-in 0.25s ease-out;
+  }
+  .toast.danger{ border-left-color:var(--danger); }
+  .toast.warn{ border-left-color:var(--warn); }
+  .toast.ok{ border-left-color:var(--ok); }
+  .toast .t-title{ font-weight:700; margin-bottom:0.15rem; }
+  .toast.danger .t-title{ color:var(--danger); }
+  .toast.warn .t-title{ color:var(--warn); }
+  .toast.ok .t-title{ color:var(--ok); }
+  .toast.fade-out{ animation:toast-out 0.35s ease-in forwards; }
+  @keyframes toast-in{ from{ opacity:0; transform:translateX(20px); } to{ opacity:1; transform:translateX(0); } }
+  @keyframes toast-out{ to{ opacity:0; transform:translateX(20px); } }
+
+  /* ---- log toolbar ---- */
+  .log-toolbar{ display:flex; gap:0.4rem; margin-bottom:0.6rem; flex-wrap:wrap; }
+  .log-toolbar select, .log-toolbar input{
+    border:1px solid var(--border); border-radius:6px; padding:0.3rem 0.5rem; font-size:0.78rem;
+  }
+  .log-toolbar input{ flex:1; min-width:6rem; }
+
+  /* ---- legend ---- */
+  .legend-toggle{
+    background:none; border:none; color:var(--text-muted); font-size:0.72rem; cursor:pointer;
+    text-decoration:underline dotted; margin-left:auto;
+  }
+  #legend-panel{
+    display:none; font-size:0.78rem; color:var(--text-muted); background:var(--panel-2);
+    border:1px solid var(--border); border-radius:8px; padding:0.6rem 0.8rem; margin-top:0.6rem;
+    line-height:1.7;
+  }
+  #legend-panel.open{ display:block; }
+  #legend-panel .lg-item{ margin-right:1rem; white-space:nowrap; display:inline-block; }
+
+  /* ---- scenario switcher ---- */
+  .btn.active{ background:rgba(255,255,255,0.32); border-color:#fff; font-weight:700; }
+
+  /* ---- before/after comparison banner ---- */
+  #comparison-banner{
+    display:none; background:linear-gradient(135deg, var(--panel), var(--panel-2));
+    border:1px solid var(--border); border-radius:12px; padding:1.1rem 1.3rem; margin-bottom:1.1rem;
+    box-shadow:var(--shadow-md); border-top:3px solid var(--accent-2);
+  }
+  #comparison-banner.open{ display:block; }
+  #comparison-banner h2{
+    margin:0 0 0.8rem; font-size:0.85rem; letter-spacing:0.06em; text-transform:uppercase; color:var(--navy);
+    font-weight:700;
+  }
+  .cmp-grid{ display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
+  @media (max-width:760px){ .cmp-grid{ grid-template-columns:1fr; } }
+  .cmp-card{ border-radius:9px; padding:0.85rem 1rem; transition:transform .15s ease, box-shadow .15s ease; }
+  .cmp-card:hover{ transform:translateY(-2px); box-shadow:0 6px 16px rgba(20,30,50,0.12); }
+  .cmp-card.bad{ background:var(--danger-soft); border:1px solid var(--danger); }
+  .cmp-card.good{ background:var(--ok-soft); border:1px solid var(--ok); }
+  .cmp-card .cmp-label{ font-size:0.72rem; text-transform:uppercase; letter-spacing:0.05em; }
+  .cmp-card.bad .cmp-label{ color:var(--danger); }
+  .cmp-card.good .cmp-label{ color:var(--ok); }
+  .cmp-card .cmp-time{ font-family:"Consolas",Menlo,monospace; font-size:1.6rem; font-weight:700; margin:0.15rem 0; }
+  .cmp-card .cmp-sub{ font-size:0.8rem; color:var(--text-muted); }
+
+  /* ---- MCP bridge console (lives in #mcp-drawer) ---- */
+  .mcp-console{ display:flex; flex-wrap:wrap; gap:0.7rem; align-items:flex-end; }
+  .mcp-console textarea{
+    border:1px solid var(--border); border-radius:6px; padding:0.4rem 0.55rem; font-size:0.85rem;
+    font-family:"Consolas",Menlo,monospace; width:100%; resize:vertical;
+  }
+  .mcp-result{
+    margin-top:0.7rem; font-family:"Consolas",Menlo,monospace; font-size:0.82rem; background:var(--panel-2);
+    border:1px solid var(--border); border-radius:6px; padding:0.5rem 0.7rem; min-height:1.6rem;
+    white-space:pre-wrap; word-break:break-word;
+  }
+  .mcp-files-heading{
+    display:flex; align-items:center; gap:0.6rem; font-size:0.75rem; letter-spacing:0.06em;
+    text-transform:uppercase; color:var(--text-muted); margin:1.1rem 0 0.5rem;
+  }
+  #mcp-files-list{ display:flex; flex-wrap:wrap; gap:0.4rem; }
+  .mcp-file-chip{
+    cursor:pointer; font-family:"Consolas",Menlo,monospace; font-size:0.78rem; background:var(--panel-2);
+    border:1px solid var(--border); border-radius:6px; padding:0.3rem 0.55rem;
+  }
+  .mcp-file-chip:hover{ background:var(--ready-soft); border-color:var(--ready); }
+  .mcp-file-preview{
+    margin-top:0.6rem; font-family:"Consolas",Menlo,monospace; font-size:0.82rem; background:var(--panel-2);
+    border:1px solid var(--border); border-radius:6px; padding:0.6rem 0.75rem; max-height:260px;
+    overflow-y:auto; white-space:pre-wrap; word-break:break-word;
+  }
+
+  /* ---- detail drawer ---- */
+  #overlay{
+    position:fixed; inset:0; background:rgba(10,16,28,0.35); z-index:30;
+    display:none;
+  }
+  #overlay.open{ display:block; }
+  #drawer{
+    position:fixed; top:0; right:0; height:100%; width:min(430px, 92vw);
+    background:var(--panel); z-index:31; box-shadow:-10px 0 32px rgba(10,16,28,0.28);
+    transform:translateX(100%); transition:transform .25s cubic-bezier(.2,.8,.2,1);
+    display:flex; flex-direction:column;
+  }
+  #drawer.open{ transform:translateX(0); }
+  .drawer-head{
+    background:linear-gradient(120deg, var(--navy), var(--navy-2) 60%, var(--navy-3));
+    color:#fff;
+    padding:1.05rem 1.2rem; display:flex; justify-content:space-between; align-items:flex-start;
+  }
+  .drawer-head .did{ font-size:1.15rem; font-weight:700; }
+  .drawer-close{ background:none; border:none; color:#fff; font-size:1.3rem; line-height:1; opacity:0.8; }
+  .drawer-close:hover{ opacity:1; }
+  .drawer-body{ padding:1.1rem 1.2rem; overflow-y:auto; flex:1; }
+  .drawer-body h3{
+    font-size:0.75rem; letter-spacing:0.06em; text-transform:uppercase; color:var(--text-muted);
+    margin:1.1rem 0 0.5rem;
+  }
+  .drawer-body h3:first-child{ margin-top:0; }
+  .meta-grid{ display:grid; grid-template-columns:1fr 1fr; gap:0.5rem 1rem; font-size:0.85rem; }
+  .meta-grid .k{ color:var(--text-muted); }
+  .action-row{ display:flex; gap:0.4rem; flex-wrap:wrap; margin-bottom:0.5rem; align-items:center; }
+  .action-row input{
+    border:1px solid var(--border); border-radius:6px; padding:0.35rem 0.5rem; font-size:0.82rem;
+    flex:1; min-width:6rem;
+  }
+  .btn-sm{
+    border-radius:6px; padding:0.35rem 0.7rem; font-size:0.8rem; font-weight:600; border:1px solid var(--border);
+    background:var(--panel-2); color:var(--text);
+  }
+  .btn-sm:hover{ background:var(--border); }
+  .btn-sm.danger{ background:var(--danger-soft); color:var(--danger); border-color:var(--danger); }
+  .btn-sm.danger:hover{ background:var(--danger); color:#fff; }
+  .btn-sm.ok{ background:var(--ok-soft); color:var(--ok); border-color:var(--ok); }
+  .btn-sm.ok:hover{ background:var(--ok); color:#fff; }
+  #drawer-log{
+    font-family:"Consolas",Menlo,monospace; font-size:0.78rem; background:var(--panel-2);
+    border:1px solid var(--border); border-radius:8px; padding:0.5rem 0.65rem; max-height:260px; overflow-y:auto;
+  }
+  #drawer-log .dl-line{ padding:0.22rem 0; border-bottom:1px dashed var(--border); }
+  #drawer-log .dl-line:last-child{ border-bottom:none; }
+
+  /* ---- MCP bridge drawer (mirrors the agent detail drawer) ---- */
+  #mcp-overlay{
+    position:fixed; inset:0; background:rgba(10,16,28,0.35); z-index:30;
+    display:none;
+  }
+  #mcp-overlay.open{ display:block; }
+  #mcp-drawer{
+    position:fixed; top:0; right:0; height:100%; width:min(520px, 94vw);
+    background:var(--panel); z-index:31; box-shadow:-10px 0 32px rgba(10,16,28,0.28);
+    transform:translateX(100%); transition:transform .25s cubic-bezier(.2,.8,.2,1);
+    display:flex; flex-direction:column;
+  }
+  #mcp-drawer.open{ transform:translateX(0); }
+  #mcp-drawer .drawer-head .hint-inline{ color:rgba(255,255,255,0.75); font-size:0.78rem; margin-top:0.2rem; }
+</style>
+</head>
+<body>
+
+  <header>
+    <div class="head-row">
+      <h1>SENTARI AGENT-OS <span class="dash">—</span> CONTROL DASHBOARD</h1>
+      <div class="head-actions">
+        <button class="btn" onclick="toggleLegend()">? Legend</button>
+        <button class="btn" id="btn-scenario-live" onclick="restartScenario('live')">↻ Restart kernel</button>
+        <button class="btn" id="btn-mcp-bridge" onclick="openMcpDrawer()">🔌 MCP Bridge</button>
+      </div>
+    </div>
+    <div class="narration-bar">
+      <span class="phase-pill" id="phase-pill">boot</span>
+      <span id="narration">Starting up...</span>
+    </div>
+  </header>
+
+  <div id="toast-stack"></div>
+
+  <main>
+    <div id="legend-panel">
+      <span class="lg-item">▶ RUNNING — holds the CPU slot now</span>
+      <span class="lg-item">● READY — admitted, waiting for a turn</span>
+      <span class="lg-item">⏳ BLOCKED — waiting on a resource held by another agent</span>
+      <span class="lg-item">✕ KILLED — force-stopped (deadlock victim or timeout)</span>
+      <span class="lg-item">■ TERMINATED — exited gracefully (quota exhausted)</span>
+      <br>
+      <span class="lg-item"><span class="chip held">holds X</span> — resource currently owned</span>
+      <span class="lg-item"><span class="chip waiting">wants X</span> — blocked waiting for it</span>
+      <span class="lg-item">Red dashed arrows in the wait-for graph = an active deadlock cycle</span>
+    </div>
+
+    <div class="cockpit">
+      <div class="title">Cockpit &mdash; admit a new agent manually</div>
+      <div class="field narrow">
+        <label for="f-agent-id">agent id (optional)</label>
+        <input id="f-agent-id" placeholder="auto">
+      </div>
+      <div class="field narrow">
+        <label for="f-priority">priority</label>
+        <input id="f-priority" type="number" value="5">
+      </div>
+      <div class="field narrow">
+        <label for="f-quota">quota</label>
+        <input id="f-quota" type="number" value="5">
+      </div>
+      <button class="btn-primary" onclick="admitAgent()">+ Admit agent</button>
+      <span class="hint">Click any agent card below to open its cockpit: fire a syscall, acquire/release a resource, or force-kill it.</span>
+    </div>
+
+    <div id="comparison-banner">
+      <h2>Same deadlock, mediated vs. unmediated</h2>
+      <div class="cmp-grid">
+        <div class="cmp-card bad">
+          <div class="cmp-label">Without Sentari (raw asyncio)</div>
+          <div class="cmp-time" id="cmp-unmanaged">—</div>
+          <div class="cmp-sub" id="cmp-unmanaged-sub"></div>
+        </div>
+        <div class="cmp-card good">
+          <div class="cmp-label">With Sentari (kernel-mediated)</div>
+          <div class="cmp-time" id="cmp-managed">—</div>
+          <div class="cmp-sub" id="cmp-managed-sub"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="stats-bar" id="stats-bar"></div>
+
+    <div class="grid">
+
+      <div class="panel">
+        <h2>Active Agents (PCB)</h2>
+        <div id="agents-list"><p class="empty-note">Waiting for the kernel...</p></div>
+      </div>
+
+      <div class="col">
+        <div class="panel">
+          <h2>Wait-For Graph</h2>
+          <div id="wait-graph"><p class="empty-note">No blocking dependencies right now.</p></div>
+        </div>
+        <div class="panel">
+          <h2>Resource Allocation</h2>
+          <div id="resource-list"><p class="empty-note">No resources acquired yet.</p></div>
+        </div>
+        <div class="panel">
+          <h2>Token / API Quota Usage</h2>
+          <div id="quota-list"></div>
+        </div>
+      </div>
+
+      <div class="panel log-panel">
+        <h2>Syscall Log (live)</h2>
+        <div class="log-toolbar">
+          <select id="log-filter-result" onchange="renderLog()">
+            <option value="">all results</option>
+            <option value="ok">OK</option>
+            <option value="warn">DENY</option>
+            <option value="danger">ERROR / kill</option>
+          </select>
+          <input id="log-filter-text" placeholder="filter by agent id..." oninput="renderLog()">
+        </div>
+        <div id="log-scroll"></div>
+      </div>
+
+    </div>
+  </main>
+
+  <footer>Live view of the real Sentari kernel — every value above is read from the running process and SQLite, not staged.</footer>
+
+  <div id="overlay" onclick="closeDrawer()"></div>
+  <div id="drawer">
+    <div class="drawer-head">
+      <div>
+        <div class="did" id="d-id">—</div>
+        <div id="d-state"></div>
+      </div>
+      <button class="drawer-close" onclick="closeDrawer()">&times;</button>
+    </div>
+    <div class="drawer-body">
+      <h3>Details</h3>
+      <div class="meta-grid" id="d-meta"></div>
+
+      <h3>Resources</h3>
+      <div id="d-resources"><span class="empty-note">none</span></div>
+
+      <h3>Fire a syscall</h3>
+      <div class="action-row">
+        <input id="d-prompt" placeholder="prompt (for tool_call)">
+      </div>
+      <div class="action-row">
+        <button class="btn-sm" onclick="fireSyscall('tool_call')">tool_call</button>
+        <button class="btn-sm" onclick="fireSyscall('yield')">yield</button>
+        <button class="btn-sm danger" onclick="killCurrent()">force kill</button>
+      </div>
+      <div id="d-syscall-result" class="mcp-result" hidden></div>
+
+      <h3>Resource control</h3>
+      <div class="action-row">
+        <input id="d-resource-key" placeholder="resource key, e.g. db">
+        <button class="btn-sm ok" onclick="acquireResource()">acquire</button>
+        <button class="btn-sm" onclick="releaseResource()">release</button>
+      </div>
+
+      <h3>This agent's syscall log</h3>
+      <div id="drawer-log"><span class="empty-note">no calls yet</span></div>
+    </div>
+  </div>
+
+  <div id="mcp-overlay" onclick="closeMcpDrawer()"></div>
+  <div id="mcp-drawer">
+    <div class="drawer-head">
+      <div>
+        <div class="did">MCP Bridge Console</div>
+        <div class="hint-inline">send the same calls scripts/mcp_bridge.py forwards from Claude Desktop</div>
+      </div>
+      <button class="drawer-close" onclick="closeMcpDrawer()">&times;</button>
+    </div>
+    <div class="drawer-body">
+      <div class="mcp-console">
+        <div class="field narrow">
+          <label for="mcp-agent-id">agent id</label>
+          <input id="mcp-agent-id" value="claude_desktop">
+        </div>
+        <div class="field narrow">
+          <label for="mcp-tool">tool</label>
+          <select id="mcp-tool" onchange="updateMcpFormVisibility()">
+            <option value="write_file">write_file</option>
+            <option value="read_file">read_file</option>
+            <option value="note">note</option>
+          </select>
+        </div>
+        <div class="field" id="mcp-path-field" style="flex:1 1 14rem;">
+          <label for="mcp-path">path (relative to mcp_workspace/)</label>
+          <input id="mcp-path" placeholder="notes/hello.md">
+        </div>
+        <div class="field" id="mcp-content-field" style="flex:1 1 100%;">
+          <label for="mcp-content" id="mcp-content-label">content</label>
+          <textarea id="mcp-content" rows="3" placeholder="File content to write, or the note prompt..."></textarea>
+        </div>
+        <button class="btn-primary" onclick="sendMcpCall()">Send</button>
+      </div>
+      <div id="mcp-result"></div>
+
+      <div class="mcp-files-heading">
+        Workspace files (mcp_workspace/)
+        <button class="btn-sm" onclick="refreshMcpFiles()">↻ refresh</button>
+      </div>
+      <div id="mcp-files-list"><p class="empty-note">No files yet -- send a write_file call above.</p></div>
+      <pre class="mcp-file-preview" id="mcp-file-preview" hidden></pre>
+    </div>
+  </div>
+
+<script>
+let currentAgent = null;
+let latestAgents = [];
+let latestResources = [];
+let latestEvents = [];
+let prevStateById = {};
+let throughputHistory = [];
+let lastCycleKey = null;
+let lastComparisonKey = null;
+let toastSeq = 0;
+
+const STATE_ICON = { RUNNING:'▶', READY:'●', BLOCKED:'⏳', KILLED:'✕', TERMINATED:'■', NEW:'○' };
+
+function esc(s){
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function resourcesFor(agentId){
+  const held = latestResources.filter(r => r.holder_agent_id === agentId).map(r => r.resource_key);
+  const waiting = latestResources.filter(r => r.waiter_agent_id === agentId).map(r => r.resource_key);
+  return { held, waiting };
+}
+
+function renderAgents(agents, cpuId){
+  latestAgents = agents;
+  const el = document.getElementById('agents-list');
+  if (!agents.length){ el.innerHTML = '<p class="empty-note">Waiting for the kernel...</p>'; return; }
+  el.innerHTML = agents.map(a => {
+    const { held, waiting } = resourcesFor(a.agent_id);
+    const chips = held.map(k => `<span class="chip held">holds ${esc(k)}</span>`).join('')
+      + waiting.map(k => `<span class="chip waiting">wants ${esc(k)}</span>`).join('');
+    const prevState = prevStateById[a.agent_id];
+    const changed = prevState !== undefined && prevState !== a.state;
+    if (changed && a.state === 'KILLED'){
+      showToast('danger', `${a.agent_id} killed`, 'Deadlock victim or forced kill — all its held resources were released.');
+    } else if (changed && a.state === 'TERMINATED'){
+      showToast('warn', `${a.agent_id} terminated`, `Quota exhausted (${a.quota_used}/${a.quota_total}) — shut down gracefully.`);
+    }
+    const isCpu = a.agent_id === cpuId;
+    return `
+    <div class="agent-card state-${a.state}${changed ? ' flash' : ''}${isCpu ? ' is-cpu' : ''}" onclick="openDrawer('${esc(a.agent_id)}')">
+      <div class="row1">
+        <span class="aid">${STATE_ICON[a.state] || ''} ${esc(a.agent_id)}${isCpu ? '<span class="cpu-tag">CPU</span>' : ''}</span>
+        <span class="state-badge state-${a.state}">${a.state}</span>
+      </div>
+      <div class="meta">priority ${a.priority} &middot; parent ${a.parent_id ? esc(a.parent_id) : '—'} &middot; quota ${a.quota_used}/${a.quota_total}</div>
+      ${chips ? `<div class="res-chips">${chips}</div>` : ''}
+    </div>`;
+  }).join('');
+  agents.forEach(a => { prevStateById[a.agent_id] = a.state; });
+}
+
+function renderWaitGraph(edges, cycleNotice){
+  const el = document.getElementById('wait-graph');
+  if (!edges.length && !cycleNotice){
+    el.innerHTML = '<p class="empty-note">No blocking dependencies right now.</p>';
+    return;
+  }
+
+  if (cycleNotice){
+    const key = `${cycleNotice.a}|${cycleNotice.b}|${cycleNotice.victim}`;
+    if (key !== lastCycleKey){
+      lastCycleKey = key;
+      showToast('danger', 'Deadlock cycle detected',
+        `${cycleNotice.a} ↔ ${cycleNotice.b} — killed ${cycleNotice.victim} (lower priority) to break the cycle.`);
+    }
+  }
+
+  const cycleIds = cycleNotice ? new Set([cycleNotice.a, cycleNotice.b]) : new Set();
+  const nodeIds = Array.from(new Set(edges.flatMap(e => [e.waiter, e.holder])
+    .concat(cycleNotice ? [cycleNotice.a, cycleNotice.b] : [])));
+
+  let svg = '';
+  if (nodeIds.length){
+    const W = 320, H = Math.max(150, nodeIds.length > 2 ? 210 : 150);
+    const cx = W / 2, cy = H / 2 - 6, r = Math.min(W, H) / 2 - 46;
+    const pos = {};
+    nodeIds.forEach((id, i) => {
+      const angle = (2 * Math.PI * i) / nodeIds.length - Math.PI / 2;
+      pos[id] = { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) };
+    });
+
+    const arrowId = 'wfg-arrow';
+    let edgesSvg = edges.map(e => {
+      const p1 = pos[e.waiter], p2 = pos[e.holder];
+      if (!p1 || !p2) return '';
+      const isCycle = cycleIds.has(e.waiter) && cycleIds.has(e.holder);
+      // shorten the line so it stops at the node's circle edge, not its center
+      const dx = p2.x - p1.x, dy = p2.y - p1.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const nodeR = 24;
+      const sx = p1.x + (dx / len) * nodeR, sy = p1.y + (dy / len) * nodeR;
+      const ex = p2.x - (dx / len) * nodeR, ey = p2.y - (dy / len) * nodeR;
+      return `<line class="wfg-edge${isCycle ? ' cycle cycle-anim' : ''}" x1="${sx.toFixed(1)}" y1="${sy.toFixed(1)}" x2="${ex.toFixed(1)}" y2="${ey.toFixed(1)}" marker-end="url(#${arrowId}${isCycle ? '-c' : ''})"/>`;
+    }).join('');
+
+    let nodesSvg = nodeIds.map(id => {
+      const p = pos[id];
+      const isCycle = cycleIds.has(id);
+      return `<g>
+        <circle class="wfg-node-circle${isCycle ? ' cycle' : ' blocked'}" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="22"/>
+        <text class="wfg-node-label" x="${p.x.toFixed(1)}" y="${(p.y + 4).toFixed(1)}" text-anchor="middle">${esc(id).slice(0, 8)}</text>
+      </g>`;
+    }).join('');
+
+    svg = `<svg id="wait-graph-svg" viewBox="0 0 ${W} ${H}">
+      <defs>
+        <marker id="${arrowId}" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--warn)"/></marker>
+        <marker id="${arrowId}-c" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--danger)"/></marker>
+      </defs>
+      ${edgesSvg}${nodesSvg}
+    </svg>`;
+  }
+
+  const banner = cycleNotice ? `<div class="cycle-banner">
+      <b>${esc(cycleNotice.a)} &harr; ${esc(cycleNotice.b)}</b> — cycle detected.<br>
+      Kernel killed <b>${esc(cycleNotice.victim)}</b> (lower priority) to break it; <b>${esc(cycleNotice.survivor)}</b> continues.
+    </div>` : '';
+
+  el.innerHTML = svg + banner;
+}
+
+function renderSparkline(history){
+  const canvas = document.getElementById('spark-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width = canvas.clientWidth * 2;
+  const h = canvas.height = canvas.clientHeight * 2;
+  ctx.clearRect(0, 0, w, h);
+  if (!history.length) return;
+  const max = Math.max(1, ...history);
+  const step = w / Math.max(1, history.length - 1);
+  ctx.beginPath();
+  history.forEach((v, i) => {
+    const x = i * step, y = h - (v / max) * (h - 6) - 3;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = '#B04A1D';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.closePath();
+  ctx.fillStyle = 'rgba(176,74,29,0.12)';
+  ctx.fill();
+}
+
+function renderStats(stats, cpuId, readyQueue){
+  const el = document.getElementById('stats-bar');
+  const counts = stats.counts || {};
+  const order = ['RUNNING', 'READY', 'BLOCKED', 'KILLED', 'TERMINATED'];
+
+  throughputHistory.push(stats.throughput || 0);
+  if (throughputHistory.length > 24) throughputHistory.shift();
+
+  const quotaPct = stats.quota_total ? Math.min(100, Math.round((stats.quota_used / stats.quota_total) * 100)) : 0;
+
+  el.innerHTML = `
+    <div class="stat-chip cpu">
+      <span class="sc-label">CPU slot</span>
+      <span class="sc-value"><span class="live-dot ${cpuId ? '' : 'idle'}"></span>${cpuId ? esc(cpuId) : 'idle'}</span>
+      <span class="sc-sub">${readyQueue.length} queued: ${readyQueue.slice(0, 4).map(esc).join(', ') || '—'}</span>
+    </div>
+    ${order.map(s => `
+    <div class="stat-chip c-${s}">
+      <span class="sc-label">${s}</span>
+      <span class="sc-value">${counts[s] || 0}</span>
+    </div>`).join('')}
+    <div class="stat-chip sparkline-chip">
+      <span class="sc-label">Syscalls / 5s</span>
+      <span class="sc-value">${stats.throughput || 0}</span>
+      <canvas id="spark-canvas"></canvas>
+    </div>
+    <div class="stat-chip">
+      <span class="sc-label">Total syscalls</span>
+      <span class="sc-value">${stats.total_syscalls || 0}</span>
+      <span class="sc-sub">${stats.total_agents || 0} agents admitted</span>
+    </div>
+    <div class="stat-chip quota-chip">
+      <span class="sc-label">System quota usage</span>
+      <span class="sc-value">${stats.quota_used || 0}/${stats.quota_total || 0}</span>
+      <div class="bar-track"><div class="bar-fill" style="width:${quotaPct}%"></div></div>
+    </div>
+  `;
+  renderSparkline(throughputHistory);
+}
+
+function renderQuota(agents){
+  const el = document.getElementById('quota-list');
+  if (!agents.length){ el.innerHTML = ''; return; }
+  el.innerHTML = agents.map(a => {
+    const pct = Math.min(100, Math.round((a.quota_used / a.quota_total) * 100));
+    const danger = pct >= 90 ? ' danger-fill' : (pct >= 60 ? ' warn-fill' : '');
+    return `
+    <div class="quota-row">
+      <div class="qr-top">
+        <span class="qa-id">${esc(a.agent_id)}</span>
+        <span class="qa-num">${a.quota_used}/${a.quota_total}</span>
+      </div>
+      <div class="bar-track"><div class="bar-fill state-${a.state}${danger}" style="width:${pct}%"></div></div>
+    </div>`;
+  }).join('');
+}
+
+function renderResources(resources){
+  const el = document.getElementById('resource-list');
+  const byKey = {};
+  resources.forEach(r => {
+    const g = byKey[r.resource_key] || (byKey[r.resource_key] = { holder: null, waiters: [] });
+    if (r.holder_agent_id) g.holder = r.holder_agent_id;
+    if (r.waiter_agent_id) g.waiters.push(r.waiter_agent_id);
+  });
+  const keys = Object.keys(byKey);
+  if (!keys.length){ el.innerHTML = '<p class="empty-note">No resources acquired yet.</p>'; return; }
+  el.innerHTML = keys.sort().map(k => {
+    const g = byKey[k];
+    return `<div class="resource-card">
+      <div class="rk">${esc(k)}</div>
+      <div class="rline"><span class="rlabel">held by</span> ${g.holder ? `<span class="rholder">${esc(g.holder)}</span>` : '<span class="rnone">free</span>'}</div>
+      <div class="rline"><span class="rlabel">waiters</span> ${g.waiters.length ? `<span class="rwaiters">${g.waiters.map(esc).join(', ')}</span>` : '<span class="rnone">none</span>'}</div>
+    </div>`;
+  }).join('');
+}
+
+function showToast(level, title, text){
+  const stack = document.getElementById('toast-stack');
+  const id = `toast-${++toastSeq}`;
+  const div = document.createElement('div');
+  div.className = `toast ${level}`;
+  div.id = id;
+  div.innerHTML = `<div class="t-title">${esc(title)}</div><div>${esc(text)}</div>`;
+  stack.appendChild(div);
+  while (stack.children.length > 5) stack.removeChild(stack.firstChild);
+  setTimeout(() => {
+    div.classList.add('fade-out');
+    setTimeout(() => div.remove(), 400);
+  }, 6000);
+}
+
+function toggleLegend(){
+  document.getElementById('legend-panel').classList.toggle('open');
+}
+
+// ---- MCP bridge console ----
+
+function updateMcpFormVisibility(){
+  const tool = document.getElementById('mcp-tool').value;
+  document.getElementById('mcp-path-field').style.display = tool === 'note' ? 'none' : '';
+  document.getElementById('mcp-content-field').style.display = tool === 'read_file' ? 'none' : '';
+  document.getElementById('mcp-content-label').textContent = tool === 'note' ? 'prompt' : 'content';
+}
+
+async function sendMcpCall(){
+  const agent_id = document.getElementById('mcp-agent-id').value.trim() || 'claude_desktop';
+  const tool = document.getElementById('mcp-tool').value;
+  const path = document.getElementById('mcp-path').value.trim();
+  const text = document.getElementById('mcp-content').value;
+
+  const body = { agent_id, tool };
+  if (tool !== 'note') body.path = path;
+  if (tool === 'write_file') body.content = text;
+  if (tool === 'note') body.prompt = text;
+
+  const resultEl = document.getElementById('mcp-result');
+  resultEl.textContent = 'sending...';
+  try{
+    const resp = await fetch('/api/mcp/tool_call', {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
+    });
+    const data = await resp.json();
+    resultEl.textContent = `${data.result || 'ERROR'}: ${data.value ?? data.error ?? '(no output)'}`;
+  }catch(err){
+    resultEl.textContent = 'Request failed: ' + err;
+  }
+  refreshMcpFiles();
+  poll();
+}
+
+function mcpPathSegments(path){
+  return path.split('/').map(encodeURIComponent).join('/');
+}
+
+async function refreshMcpFiles(){
+  const el = document.getElementById('mcp-files-list');
+  try{
+    const resp = await fetch('/api/mcp/files');
+    const data = await resp.json();
+    if (!data.files || !data.files.length){
+      el.innerHTML = '<p class="empty-note">No files yet -- send a write_file call above.</p>';
+      return;
+    }
+    el.innerHTML = data.files.map(f =>
+      `<span class="mcp-file-chip" onclick="previewMcpFile('${esc(f.path)}')">${esc(f.path)} (${f.size}b)</span>`
+    ).join('');
+  }catch(err){
+    el.innerHTML = '<p class="empty-note">Could not reach the dashboard server.</p>';
+  }
+}
+
+async function previewMcpFile(path){
+  const pre = document.getElementById('mcp-file-preview');
+  pre.hidden = false;
+  pre.textContent = 'loading...';
+  const resp = await fetch('/api/mcp/files/' + mcpPathSegments(path));
+  if (!resp.ok){
+    const err = await resp.json().catch(() => ({}));
+    pre.textContent = `Could not load '${path}': ${err.error || resp.status}`;
+    return;
+  }
+  const data = await resp.json();
+  pre.textContent = `# ${data.path} (${data.size} bytes)\n\n${data.content}`;
+}
+
+function renderScenarioButtons(scenario){
+  ['live'].forEach(name => {
+    const btn = document.getElementById(`btn-scenario-${name}`);
+    if (btn) btn.classList.toggle('active', name === scenario);
+  });
+}
+
+function renderComparison(cmp){
+  const el = document.getElementById('comparison-banner');
+  if (!cmp){ el.classList.remove('open'); lastComparisonKey = null; return; }
+  el.classList.add('open');
+
+  document.getElementById('cmp-unmanaged').textContent = `${cmp.unmanaged_elapsed.toFixed(2)}s`;
+  document.getElementById('cmp-unmanaged-sub').textContent =
+    `still stuck when cut off at ${cmp.hang_cap}s — unbounded in production, nobody was watching`;
+  document.getElementById('cmp-managed').textContent = `${cmp.managed_elapsed_ms.toFixed(1)}ms`;
+  document.getElementById('cmp-managed-sub').textContent =
+    `${cmp.victim} killed automatically, ${cmp.survivor} continued — kernel's wait-for graph detector`;
+
+  const key = `${cmp.unmanaged_elapsed}|${cmp.managed_elapsed_ms}|${cmp.victim}`;
+  if (key !== lastComparisonKey){
+    lastComparisonKey = key;
+    const speedup = Math.round((cmp.unmanaged_elapsed * 1000) / cmp.managed_elapsed_ms);
+    showToast('ok', 'Same deadlock, ~' + speedup.toLocaleString() + 'x faster',
+      `Unmanaged: stuck ${cmp.unmanaged_elapsed.toFixed(2)}s+. Sentari-managed: resolved in ${cmp.managed_elapsed_ms.toFixed(1)}ms.`);
+  }
+}
+
+function toggleArgs(id){
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle('open');
+}
+
+const LEVEL_ICON = { ok:'✓', warn:'⚠', danger:'✕', info:'·', dim:'■' };
+
+function renderLog(events){
+  events = events || latestEvents;
+  const levelFilter = document.getElementById('log-filter-result').value;
+  const textFilter = document.getElementById('log-filter-text').value.trim().toLowerCase();
+  const filtered = events.filter(e =>
+    (!levelFilter || e.level === levelFilter) &&
+    (!textFilter || e.source.toLowerCase().includes(textFilter))
+  );
+
+  const el = document.getElementById('log-scroll');
+  const wasAtBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 8;
+  if (!filtered.length){
+    el.innerHTML = '<p class="empty-note">No matching log entries.</p>';
+    return;
+  }
+  el.innerHTML = filtered.map((e, i) => {
+    const t = new Date(e.time * 1000).toLocaleTimeString();
+    const hasArgs = e.args && e.args !== '{}';
+    const argsId = `args-${i}`;
+    return `<div class="log-line ${hasArgs ? 'expandable' : ''}">
+      <div class="lrow" ${hasArgs ? `onclick="toggleArgs('${argsId}')"` : ''}>
+        <span class="lt">${t}</span>
+        <span class="ls">${esc(e.source)}</span>
+        <span class="ltext ${e.level}">${LEVEL_ICON[e.level] || ''} ${esc(e.text)}</span>
+      </div>
+      ${hasArgs ? `<div class="log-args" id="${argsId}">${esc(e.args)}</div>` : ''}
+    </div>`;
+  }).join('');
+  if (wasAtBottom) el.scrollTop = el.scrollHeight;
+}
+
+async function poll(){
+  try{
+    const res = await fetch('/api/state');
+    const data = await res.json();
+    document.getElementById('narration').textContent = data.narration;
+    document.getElementById('phase-pill').textContent = data.phase;
+    latestResources = data.resources || [];
+    latestEvents = data.events || [];
+    renderScenarioButtons(data.scenario);
+    renderComparison(data.comparison);
+    renderStats(data.stats || {}, data.cpu, data.ready_queue || []);
+    renderAgents(data.agents, data.cpu);
+    renderWaitGraph(data.wait_edges, data.cycle_notice);
+    renderResources(latestResources);
+    renderQuota(data.agents);
+    renderLog(latestEvents);
+    if (currentAgent) refreshDrawer();
+  }catch(err){
+    document.getElementById('narration').textContent = 'Lost connection to the dashboard server...';
+  }
+}
+
+async function restartScenario(name){
+  name = name || 'standard';
+  await fetch('/api/restart?scenario=' + encodeURIComponent(name), { method: 'POST' });
+  document.getElementById('log-scroll').innerHTML = '';
+  prevStateById = {};
+  lastCycleKey = null;
+  lastComparisonKey = null;
+  throughputHistory = [];
+  document.getElementById('toast-stack').innerHTML = '';
+  document.getElementById('comparison-banner').classList.remove('open');
+  document.getElementById('mcp-file-preview').hidden = true;
+  document.getElementById('mcp-result').textContent = '';
+  closeDrawer();
+  poll();
+}
+
+async function admitAgent(){
+  const agent_id = document.getElementById('f-agent-id').value.trim() || null;
+  const priority = parseInt(document.getElementById('f-priority').value, 10) || 5;
+  const quota_total = parseInt(document.getElementById('f-quota').value, 10) || 5;
+  const resp = await fetch('/api/admit', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ agent_id, priority, quota_total })
+  });
+  const data = await resp.json();
+  if (data.agent_id){
+    document.getElementById('f-agent-id').value = '';
+    poll();
+  } else if (data.error){
+    alert('Could not admit agent: ' + data.error);
+  }
+}
+
+// ---- drawer ----
+
+function openDrawer(agentId){
+  currentAgent = agentId;
+  document.getElementById('overlay').classList.add('open');
+  document.getElementById('drawer').classList.add('open');
+  refreshDrawer();
+}
+
+function closeDrawer(){
+  currentAgent = null;
+  document.getElementById('overlay').classList.remove('open');
+  document.getElementById('drawer').classList.remove('open');
+}
+
+// ---- MCP bridge drawer ----
+
+function openMcpDrawer(){
+  document.getElementById('mcp-overlay').classList.add('open');
+  document.getElementById('mcp-drawer').classList.add('open');
+  refreshMcpFiles();
+}
+
+function closeMcpDrawer(){
+  document.getElementById('mcp-overlay').classList.remove('open');
+  document.getElementById('mcp-drawer').classList.remove('open');
+}
+
+async function refreshDrawer(){
+  if (!currentAgent) return;
+  const resp = await fetch('/api/agent/' + encodeURIComponent(currentAgent));
+  if (!resp.ok){ closeDrawer(); return; }
+  const a = await resp.json();
+
+  document.getElementById('d-id').textContent = a.agent_id;
+  document.getElementById('d-state').innerHTML = `<span class="state-badge state-${a.state}">${a.state}</span>`;
+
+  document.getElementById('d-meta').innerHTML = `
+    <div class="k">priority</div><div>${a.priority}</div>
+    <div class="k">parent</div><div>${a.parent_id ? esc(a.parent_id) : '—'}</div>
+    <div class="k">quota</div><div>${a.quota_used} / ${a.quota_total} (${a.quota_remaining} left)</div>
+    <div class="k">last updated</div><div>${new Date(a.updated_at * 1000).toLocaleTimeString()}</div>
+  `;
+
+  const chips = a.held_resources.map(k => `<span class="chip held">holds ${esc(k)}</span>`).join('')
+    + a.waiting_on.map(k => `<span class="chip waiting">wants ${esc(k)}</span>`).join('');
+  document.getElementById('d-resources').innerHTML = chips || '<span class="empty-note">none</span>';
+
+  const log = a.syscall_log.slice().reverse();
+  document.getElementById('drawer-log').innerHTML = log.length
+    ? log.map(r => `<div class="dl-line">${new Date(r.time*1000).toLocaleTimeString()} &nbsp; ${esc(r.syscall_type)} &rarr; ${esc(r.result)}</div>`).join('')
+    : '<span class="empty-note">no calls yet</span>';
+}
+
+async function fireSyscall(type){
+  if (!currentAgent) return;
+  const prompt = document.getElementById('d-prompt').value.trim();
+  const resultBox = document.getElementById('d-syscall-result');
+  resultBox.hidden = false;
+  resultBox.textContent = 'Running...';
+  const resp = await fetch('/api/syscall', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ agent_id: currentAgent, syscall_type: type, prompt: prompt || undefined })
+  });
+  const data = await resp.json();
+  if (data.result === 'OK' && data.truncated) {
+    resultBox.textContent = '⚠️ Token limit reached — showing partial result:\n\n' + data.value;
+  } else if (data.result === 'OK') {
+    resultBox.textContent = data.value;
+  } else {
+    resultBox.textContent = `${data.result}: ${data.error || 'no further detail'}`;
+  }
+  refreshDrawer(); poll();
+}
+
+async function acquireResource(){
+  if (!currentAgent) return;
+  const resource_key = document.getElementById('d-resource-key').value.trim();
+  if (!resource_key){ alert('Enter a resource key first.'); return; }
+  await fetch('/api/acquire', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ agent_id: currentAgent, resource_key })
+  });
+  refreshDrawer(); poll();
+}
+
+async function releaseResource(){
+  if (!currentAgent) return;
+  const resource_key = document.getElementById('d-resource-key').value.trim();
+  if (!resource_key){ alert('Enter a resource key first.'); return; }
+  await fetch('/api/release', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ agent_id: currentAgent, resource_key })
+  });
+  refreshDrawer(); poll();
+}
+
+async function killCurrent(){
+  if (!currentAgent) return;
+  if (!confirm(`Force-kill ${currentAgent}?`)) return;
+  await fetch('/api/kill', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ agent_id: currentAgent })
+  });
+  refreshDrawer(); poll();
+}
+
+updateMcpFormVisibility();
+poll();
+setInterval(poll, 500);
+refreshMcpFiles();
+setInterval(refreshMcpFiles, 2000);
+</script>
+</body>
+</html>

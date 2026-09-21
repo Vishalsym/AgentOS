@@ -1,0 +1,91 @@
+{
+  "overhead": {
+    "n_calls": 500,
+    "raw_total_s": 6.009999924572185e-05,
+    "mediated_total_s": 0.05658760000005714,
+    "raw_avg_us": 0.1201999984914437,
+    "mediated_avg_us": 113.17520000011427,
+    "mediation_overhead_per_call_us": 113.05500000162283,
+    "overhead_pct_of_noop_baseline": 94055.74161439821,
+    "overhead_pct_of_realistic_llm_call": 0.037685000000540946
+  },
+  "fairness": {
+    "n_agents": 6,
+    "calls_per_agent": 25,
+    "per_agent_mean_latency_us": {
+      "fair-0": 815.0680000107968,
+      "fair-1": 817.2400001058122,
+      "fair-2": 821.5119999658782,
+      "fair-3": 825.4320002743043,
+      "fair-4": 829.1319999261759,
+      "fair-5": 832.5320002768422
+    },
+    "overall_mean_latency_us": 823.4860000933015,
+    "overall_latency_stdev_us": 6.208411872528664,
+    "coefficient_of_variation_pct": 0.7539183267020018,
+    "jain_fairness_index_on_turns_served": 1.0
+  },
+  "starvation_modest": {
+    "duration_s": 5.0,
+    "low_priority_value": 5,
+    "estimated_convergence_s": 8.0,
+    "turns_per_agent": {
+      "hp-0": 8807,
+      "hp-1": 8807,
+      "hp-2": 8807,
+      "hp-3": 8806,
+      "starved-candidate": 1
+    },
+    "total_turns": 35228,
+    "low_priority_agent_turns": 1,
+    "low_priority_agent_share_pct": 0.0028386510730101055,
+    "starved": false
+  },
+  "starvation_extreme": {
+    "duration_s": 2.5,
+    "low_priority_value": 50,
+    "estimated_convergence_s": 98.0,
+    "turns_per_agent": {
+      "hp-0": 4574,
+      "hp-1": 4574,
+      "hp-2": 4574,
+      "hp-3": 4573,
+      "starved-candidate": 1
+    },
+    "total_turns": 18296,
+    "low_priority_agent_turns": 1,
+    "low_priority_agent_share_pct": 0.005465675557498907,
+    "starved": false
+  },
+  "deadlock": {
+    "n_trials": 20,
+    "managed_ms_all_trials": [
+      0.5387999990489334,
+      0.4217999994580168,
+      0.37510000038309954,
+      0.3671000013127923,
+      0.38300000051094685,
+      0.3761000007216353,
+      0.6507999987661606,
+      0.47079999967536423,
+      5.152499999894644,
+      0.4408999993756879,
+      0.38239999958022963,
+      0.3868000003421912,
+      0.4317999992053956,
+      0.3942000003007706,
+      0.5711999983759597,
+      0.4291000004741363,
+      0.37659999907191377,
+      0.37119999979040585,
+      0.558600000658771,
+      0.9853999999904772
+    ],
+    "managed_ms_mean": 0.7032099998468766,
+    "managed_ms_median": 0.4254499999660766,
+    "managed_ms_max": 5.152499999894644,
+    "unmanaged_hang_cap_s": 1.0,
+    "unmanaged_still_stuck_after_s": 1.0511802000000898,
+    "speedup_factor_vs_hang_cap": 1422.0503124496938
+  }
+}
