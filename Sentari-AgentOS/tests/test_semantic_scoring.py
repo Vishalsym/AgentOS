@@ -53,6 +53,47 @@ async def test_raises_clearly_when_no_number_found_rather_than_guessing():
 
 
 @pytest.mark.asyncio
+async def test_prefers_an_explicit_score_label_over_any_other_number():
+    provider = FixedResponseProvider(
+        "Thinking about this on a scale from 0.0 to 1.0, and considering it "
+        "could take up to 3 attempts...\nSCORE: 0.42"
+    )
+    assert await score_task_value(provider, "task") == pytest.approx(0.42)
+
+
+@pytest.mark.asyncio
+async def test_regression_verbose_reasoning_that_restates_the_scale_first():
+    """The exact reported bug: two different real tasks both scored 1.0.
+    Root cause -- a verbose model restates "0.0 to 1.0" (or similar) while
+    reasoning before giving its real answer, and the old parser took the
+    FIRST number in the response, which is that restated scale value, not
+    the model's actual judgment. Reproduced here with two clearly different
+    tasks that must now score differently despite both opening with scale
+    language, proving the fix takes the model's actual conclusion instead."""
+    low_value_response = (
+        "I need to rate this from 0.0 to 1.0. This is a disposable scratch "
+        "note with no real consequence if lost. My assessment: 0.05"
+    )
+    high_value_response = (
+        "I need to rate this from 0.0 to 1.0. This represents hours of "
+        "irreplaceable work a user is actively waiting on. My assessment: 0.95"
+    )
+    low = await score_task_value(FixedResponseProvider(low_value_response), "scratch note")
+    high = await score_task_value(FixedResponseProvider(high_value_response), "irreplaceable report")
+    assert low == pytest.approx(0.05)
+    assert high == pytest.approx(0.95)
+    assert low != high  # the actual bug: these used to come out identical
+
+
+@pytest.mark.asyncio
+async def test_on_raw_response_callback_receives_the_exact_provider_text():
+    captured = []
+    provider = FixedResponseProvider("SCORE: 0.6")
+    await score_task_value(provider, "task", on_raw_response=captured.append)
+    assert captured == ["SCORE: 0.6"]
+
+
+@pytest.mark.asyncio
 async def test_works_against_the_real_mock_provider_interface():
     provider = MockProvider()
     # MockProvider's deterministic hash-based response always contains

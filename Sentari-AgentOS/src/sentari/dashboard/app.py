@@ -11,6 +11,8 @@ Run with: uv run python scripts/dashboard.py, then open http://127.0.0.1:8000
 from __future__ import annotations
 
 import asyncio
+import json
+import re
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -142,6 +144,10 @@ async def get_state() -> JSONResponse:
             "priority": pcb.priority,
             "quota_used": pcb.quota_used,
             "quota_total": pcb.quota_total,
+            # task_value lives only on the live in-memory PCB (like
+            # agent_type/declared_resource_claims, it isn't persisted to
+            # SQLite) -- read it from the scheduler, not agent_repo.
+            "task_value": _task_value_or_none(kernel, pcb.agent_id),
         }
         for pcb in all_pcbs
     ]
@@ -228,6 +234,7 @@ async def agent_detail(agent_id: str) -> JSONResponse:
             "quota_used": pcb.quota_used,
             "quota_total": pcb.quota_total,
             "quota_remaining": pcb.quota_remaining,
+            "task_value": _task_value_or_none(kernel, pcb.agent_id),
             "created_at": pcb.created_at,
             "updated_at": pcb.updated_at,
             "held_resources": held,
@@ -252,6 +259,7 @@ class AdmitRequest(BaseModel):
     agent_id: str | None = None
     priority: int = 5
     quota_total: int = 5
+    task_description: str | None = None
 
 
 class SyscallRequestBody(BaseModel):
@@ -274,6 +282,10 @@ class KillRequestBody(BaseModel):
     reason: str | None = "manual"
 
 
+class TeamStartBody(BaseModel):
+    project: str
+
+
 class McpToolCallBody(BaseModel):
     agent_id: str = "claude_desktop"
     tool: str  # "write_file" | "read_file" | "note"
@@ -291,19 +303,58 @@ def _kernel_or_error() -> tuple[Any, JSONResponse | None]:
     return kernel, None
 
 
+def _task_value_or_none(kernel: Any, agent_id: str) -> float | None:
+    try:
+        return kernel.scheduler.get(agent_id).task_value
+    except KeyError:
+        return None
+
+
 @app.post("/api/admit")
 async def admit_agent(body: AdmitRequest) -> JSONResponse:
     kernel, err = _kernel_or_error()
     if err:
         return err
+
+    task_value: float | None = None
+    if body.task_description:
+        # Real LLM judgment (novel mechanism #1: semantic-value-aware
+        # deadlock resolution) -- scored once, here, at admission time,
+        # never during deadlock detection itself (that path stays
+        # synchronous and sub-millisecond; see deadlock/semantic_scoring.py).
+        raw_holder: list[str] = []
+        try:
+            from sentari.deadlock.semantic_scoring import score_task_value
+
+            task_value = await score_task_value(
+                kernel.provider, body.task_description, on_raw_response=raw_holder.append
+            )
+            raw = raw_holder[0] if raw_holder else ""
+            await dashboard_state.log_event(
+                "COCKPIT",
+                f"scored '{body.task_description[:60]}' -> task_value={task_value:.2f} "
+                f"(raw response: {raw[:200]!r})",
+                "info",
+            )
+        except Exception as exc:  # noqa: BLE001 -- a scoring failure must not block admission
+            raw = raw_holder[0] if raw_holder else "<no response captured>"
+            await dashboard_state.log_event(
+                "COCKPIT", f"task-value scoring failed: {exc} (raw response: {raw[:200]!r})", "warn"
+            )
+
     try:
-        pcb = kernel.admit(priority=body.priority, quota_total=body.quota_total, agent_id=body.agent_id or None)
+        pcb = kernel.admit(
+            priority=body.priority,
+            quota_total=body.quota_total,
+            agent_id=body.agent_id or None,
+            task_value=task_value,
+        )
     except Exception as exc:  # noqa: BLE001 -- surface as a normal API error, don't crash the server
         return JSONResponse({"error": str(exc)}, status_code=400)
     await dashboard_state.log_event(
         "COCKPIT", f"admitted {pcb.agent_id} (priority={body.priority}, quota={body.quota_total})", "info"
     )
-    return JSONResponse({"agent_id": pcb.agent_id})
+    return JSONResponse({"agent_id": pcb.agent_id, "task_value": task_value})
 
 
 def _build_arguments(body: SyscallRequestBody) -> dict[str, Any]:
@@ -406,6 +457,260 @@ async def kill_agent(body: KillRequestBody) -> JSONResponse:
     return JSONResponse({"ok": True})
 
 
+@app.post("/api/interrupt")
+async def interrupt_agent(body: KillRequestBody) -> JSONResponse:
+    """Unlike /api/kill (which only updates PCB state and releases
+    resources), this cancels the agent's actual in-flight asyncio Task --
+    if it's mid-syscall on a real, slow network call (e.g. a real
+    Anthropic completion), that real call is genuinely aborted right now,
+    not left running in the background until it naturally finishes. See
+    SyscallLayer.interrupt / Kernel.interrupt (novel mechanism #4,
+    bounded-latency human interrupt)."""
+    kernel, err = _kernel_or_error()
+    if err:
+        return err
+    had_inflight = await kernel.interrupt(body.agent_id, reason=body.reason or "manual_interrupt")
+    await dashboard_state.log_event(
+        "COCKPIT",
+        f"interrupted {body.agent_id}"
+        + (" (cancelled a real in-flight call)" if had_inflight else " (was idle, killed anyway)"),
+        "danger",
+    )
+    return JSONResponse({"ok": True, "had_inflight_call": had_inflight})
+
+
+# ---------------------------------------------------- 3-agent real team demo -
+
+
+async def _mediated_call(kernel: Any, agent_id: str, resource_key: str, fn: Any) -> Any:
+    """One resource-mediated TOOL_CALL syscall -- the single building block
+    every stage below uses (gating on a teammate, reading a teammate's
+    real output, and generating+writing your own all go through this exact
+    same, already-tested kernel.syscall path -- no raw scheduler/resource-
+    manager calls in this orchestration, so there's no risk of the turn-
+    management self-conflicts a hand-rolled acquire/release sequence could
+    introduce)."""
+    response = await kernel.syscall(agent_id, SyscallType.TOOL_CALL, {"resource_key": resource_key, "fn": fn})
+    if response.result.value != "OK":
+        raise RuntimeError(f"{agent_id}'s call on '{resource_key}' failed: {response.error}")
+    return response.value
+
+
+async def _real_write(
+    kernel: Any, agent_id: str, filename: str, prompt: str, resource_key: str | None = None
+) -> str:
+    """A real provider.complete() call, holding `resource_key` for the
+    entire real generation, then a real write to mcp_workspace/filename.
+    If `resource_key` isn't given, the file's own path is used (matching
+    the MCP bridge's generate_and_write tool); passing an explicit
+    resource_key (e.g. "stage:design") is what lets a *different* agent
+    gate on this stage finishing without needing to know the filename."""
+    target = _resolve_mcp_path(filename)
+    key = resource_key or f"mcp:{target}"
+
+    async def _fn() -> str:
+        content = await kernel.provider.complete(prompt)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+        return content
+
+    return await _mediated_call(kernel, agent_id, key, _fn)
+
+
+async def _real_read(kernel: Any, agent_id: str, filename: str) -> str:
+    target = _resolve_mcp_path(filename)
+
+    async def _fn() -> str:
+        return target.read_text(encoding="utf-8") if target.exists() else ""
+
+    return await _mediated_call(kernel, agent_id, f"mcp:{target}", _fn)
+
+
+async def _gate(kernel: Any, agent_id: str, gate_key: str) -> None:
+    """Block (genuinely -- real wait-for-graph edge, real BLOCKED state)
+    until whoever currently holds `gate_key` releases it, then continue.
+    A trivial no-op call under the hood; its only purpose is the
+    acquire/release semantics."""
+
+    async def _fn() -> None:
+        return None
+
+    await _mediated_call(kernel, agent_id, gate_key, _fn)
+
+
+MAX_TEAM_SIZE = 5
+
+_TEAM_PLAN_PROMPT = (
+    "You are decomposing a software project into a small real team of AI agents "
+    "that will each do REAL work (their own LLM generation, written to their own "
+    "file). Project: {project}\n\n"
+    f"Decide how many agents this genuinely needs -- between 1 and {MAX_TEAM_SIZE}. "
+    "Do not default to any fixed number or fixed role names; pick whatever roles "
+    "actually fit this specific project. For each agent give a short name "
+    "(lowercase, letters/digits/underscores only, no spaces, e.g. 'ui_designer' "
+    "or 'api_dev'), a one-sentence task, and a list of the OTHER agents' names "
+    "it must wait for and read the real output of before it can start (empty "
+    "list if it can start immediately). Dependencies must not be circular.\n\n"
+    "Respond with ONLY a JSON array between the markers <PLAN> and </PLAN>, "
+    "nothing else outside those markers, in exactly this shape:\n"
+    "<PLAN>\n"
+    '[{{"name": "ui_designer", "task": "design the screens and user flow", "depends_on": []}}, '
+    '{{"name": "backend_dev", "task": "design the API and data model", "depends_on": []}}, '
+    '{{"name": "reviewer", "task": "check the API and screens are consistent with each other", '
+    '"depends_on": ["ui_designer", "backend_dev"]}}]\n'
+    "</PLAN>"
+)
+
+_PLAN_BLOCK_RE = re.compile(r"<PLAN>(.*?)</PLAN>", re.DOTALL | re.IGNORECASE)
+_NAME_SANITIZE_RE = re.compile(r"[^a-z0-9_]+")
+
+
+def _sanitize_agent_name(raw: str, fallback_index: int) -> str:
+    name = _NAME_SANITIZE_RE.sub("_", raw.strip().lower()).strip("_")
+    return name or f"agent_{fallback_index}"
+
+
+async def _plan_team(kernel: Any, project: str) -> list[dict[str, Any]]:
+    """One real LLM call that decides the team's own shape -- how many
+    agents, what each is called, and who waits on whom -- instead of this
+    file hardcoding role names/count. The model's raw JSON is validated and
+    sanitized (names made filesystem/resource-key-safe, unknown/self
+    dependency references dropped, size clamped to MAX_TEAM_SIZE) but never
+    silently padded or renamed beyond that -- if the model asks for 2
+    agents, you get 2. A genuinely circular dependency isn't detected here;
+    it's left to the kernel's own real DeadlockDetector to catch and break
+    live, the same as any other resource cycle."""
+    raw = await kernel.provider.complete(_TEAM_PLAN_PROMPT.format(project=project))
+    match = _PLAN_BLOCK_RE.search(raw)
+    if not match:
+        raise ValueError(f"planner did not return a <PLAN>...</PLAN> block: {raw!r}")
+    try:
+        parsed = json.loads(match.group(1))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"planner's PLAN block was not valid JSON: {match.group(1)!r}") from exc
+    if not isinstance(parsed, list) or not parsed:
+        raise ValueError(f"planner's PLAN block was not a non-empty JSON array: {parsed!r}")
+
+    parsed = parsed[:MAX_TEAM_SIZE]
+    seen: set[str] = set()
+    plan: list[dict[str, Any]] = []
+    for i, entry in enumerate(parsed):
+        if not isinstance(entry, dict):
+            continue
+        name = _sanitize_agent_name(str(entry.get("name", "")), i)
+        while name in seen:
+            name = f"{name}_{i}"
+        seen.add(name)
+        task = str(entry.get("task") or "contribute to the project").strip()
+        deps_raw = entry.get("depends_on") or []
+        deps = [_sanitize_agent_name(str(d), 0) for d in deps_raw if isinstance(d, str)]
+        plan.append({"name": name, "task": task, "depends_on": deps})
+
+    valid_names = {a["name"] for a in plan}
+    for agent in plan:
+        agent["depends_on"] = [d for d in agent["depends_on"] if d in valid_names and d != agent["name"]]
+
+    if not plan:
+        raise ValueError(f"planner produced no usable agents from: {raw!r}")
+    return plan
+
+
+async def _run_team(kernel: Any, project: str, plan: list[dict[str, Any]]) -> None:
+    """Every agent in `plan` (an LLM-decided list, not hardcoded roles/
+    count) is admitted, then all of them race concurrently via
+    asyncio.gather. The only thing enforcing "X waits for Y" is the
+    kernel's own resource lock on `stage:{Y}` -- gate on each dependency's
+    stage key, then really read that dependency's own output file, then
+    generate and write your own. Remove the gates and every agent would
+    just race independently; the ordering you see live is the kernel doing
+    real work, not narration.
+
+    Each agent's own `stage:{name}` key is claimed for it up front, in a
+    strictly sequential loop, BEFORE any concurrent work starts. This
+    matters: without it, a downstream agent's gate-acquire on
+    `stage:{producer}` and the producer's own first acquire of that same
+    key are two independent coroutines racing on a freely-available lock --
+    whichever happens to reach ResourceManager.acquire first wins it, so a
+    consumer scheduled slightly ahead of a still-blocked producer could
+    grab its own dependency's key before the producer ever does, sail
+    through with empty context, and defeat the whole gate. Pre-claiming
+    sequentially removes that race entirely: by the time asyncio.gather
+    starts the real concurrent generation, every stage key is already held
+    by its rightful owner, so every gate-acquire downstream is a genuine,
+    deterministic wait -- not a coin flip."""
+    for agent in plan:
+        kernel.admit(priority=5, quota_total=2000, agent_id=agent["name"], agent_type="team_member")
+    for agent in plan:
+        await kernel.resources.acquire(agent["name"], f"stage:{agent['name']}")
+    summary = "; ".join(
+        f"{a['name']} (waits on: {', '.join(a['depends_on']) or 'none'})" for a in plan
+    )
+    await dashboard_state.log_event("TEAM", f"team plan for '{project}': {summary}", "info")
+
+    async def run_stage(agent: dict[str, Any]) -> None:
+        name = agent["name"]
+        try:
+            for dep in agent["depends_on"]:
+                await _gate(kernel, name, f"stage:{dep}")
+            context_parts = []
+            for dep in agent["depends_on"]:
+                text = await _real_read(kernel, name, f"team_{dep}.md")
+                if text:
+                    context_parts.append(f"=== {dep}'s real output ===\n{text}")
+            context = "\n\n".join(context_parts)
+            prompt = (
+                f"You are the '{name}' agent on a real small software team. Project: {project}\n"
+                f"Your task: {agent['task']}\n\n"
+                + (f"Your teammates' real output so far:\n\n{context}\n\n" if context else "")
+                + "If your task is to build/design/implement something, write REAL, working "
+                "code for it (with filenames/paths as comments and enough of the surrounding "
+                "file -- imports, function signatures, etc. -- that it's a genuine artifact, "
+                "not pseudocode or a description of what you would write). If your task is "
+                "inherently a review/verification, write concrete findings that reference "
+                "specific code or decisions from your teammates' real output above, not "
+                "generic advice. Do not just describe your contribution in prose -- produce it."
+            )
+            await _real_write(kernel, name, f"team_{name}.md", prompt)
+        finally:
+            kernel.resources.release(name, f"stage:{name}")
+
+    results = await asyncio.gather(*(run_stage(agent) for agent in plan), return_exceptions=True)
+    for agent, result in zip(plan, results, strict=True):
+        if isinstance(result, Exception):
+            await dashboard_state.log_event("TEAM", f"{agent['name']}'s stage failed: {result}", "danger")
+    files = ", ".join(f"team_{a['name']}.md" for a in plan)
+    await dashboard_state.log_event(
+        "TEAM", f"team run complete -- see {files} in the MCP workspace files list", "ok"
+    )
+
+
+@app.post("/api/team/start")
+async def start_team(body: TeamStartBody) -> JSONResponse:
+    kernel, err = _kernel_or_error()
+    if err:
+        return err
+    project = (body.project or "").strip()
+    if not project:
+        return JSONResponse({"error": "project description is required"}, status_code=400)
+
+    if getattr(kernel, "_team_started", False):
+        return JSONResponse(
+            {"error": "A team has already run in this session -- restart the kernel first (↻ Restart kernel)."},
+            status_code=400,
+        )
+
+    await dashboard_state.log_event("TEAM", f"planning a team for: {project}", "info")
+    try:
+        plan = await _plan_team(kernel, project)
+    except ValueError as exc:
+        await dashboard_state.log_event("TEAM", f"planning failed: {exc}", "danger")
+        return JSONResponse({"error": f"team planning failed: {exc}"}, status_code=502)
+
+    kernel._team_started = True
+    asyncio.create_task(_run_team(kernel, project, plan))
+    return JSONResponse({"started": True, "plan": plan})
+
+
 # ------------------------------------------------------- MCP bridge (external clients like Claude Desktop) -
 
 
@@ -449,6 +754,26 @@ async def mcp_tool_call(body: McpToolCallBody) -> JSONResponse:
             arguments = {"resource_key": f"mcp:{target}", "fn": _fn}
         elif body.tool == "note":
             arguments = {"prompt": body.prompt or "note"}
+        elif body.tool == "generate_and_write":
+            # Real cross-framework contention demo: the resource lock spans
+            # the ACTUAL LLM generation, not a fake delay -- whatever
+            # LLMProvider this kernel is configured with (MockProvider or
+            # the real AnthropicProvider) generates body.prompt's content,
+            # and only once that real call returns does the file get
+            # written and the lock released. A second caller (e.g. the
+            # MCP bridge from a real Claude Desktop chat) targeting the
+            # same path genuinely blocks for as long as generation
+            # actually takes -- no scripted sleep anywhere in this path.
+            target = _resolve_mcp_path(body.path)
+            prompt = body.prompt or "Write a short note."
+
+            async def _fn(_target=target, _prompt=prompt) -> str:
+                content = await kernel.provider.complete(_prompt)
+                _target.parent.mkdir(parents=True, exist_ok=True)
+                _target.write_text(content, encoding="utf-8")
+                return f"generated {len(content)} chars and wrote to mcp_workspace/{_target.name}"
+
+            arguments = {"resource_key": f"mcp:{target}", "fn": _fn}
         else:
             return JSONResponse({"error": f"unknown tool: {body.tool}"}, status_code=400)
     except ValueError as exc:
@@ -490,9 +815,13 @@ async def read_mcp_file(file_path: str) -> JSONResponse:
 
 
 def main() -> None:
+    import os
+
     import uvicorn
 
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    host = os.environ.get("HOST", "0.0.0.0")
+    port = int(os.environ.get("PORT", "8000"))
+    uvicorn.run(app, host=host, port=port)
 
 
 if __name__ == "__main__":

@@ -85,9 +85,10 @@
   .field{ display:flex; flex-direction:column; gap:0.25rem; }
   .field label{ font-size:0.72rem; color:var(--text-muted); }
   .field input{
-    border:1px solid var(--border); border-radius:6px; padding:0.4rem 0.55rem; font-size:0.88rem;
+    border:1px solid var(--border); border-radius:6px; padding:0.55rem 0.7rem; font-size:0.92rem;
     width:9rem; transition:border-color .15s, box-shadow .15s;
   }
+  .field:not(.narrow) input{ width:100%; box-sizing:border-box; }
   .field input:focus, .action-row input:focus, select:focus, textarea:focus{
     outline:none; border-color:var(--navy-3); box-shadow:0 0 0 3px rgba(42,74,140,0.14);
   }
@@ -504,8 +505,23 @@
         <label for="f-quota">quota</label>
         <input id="f-quota" type="number" value="5">
       </div>
+      <div class="field" style="flex:3 1 24rem; min-width:20rem;">
+        <label for="f-task">task description (optional -- scored by a real LLM call into task_value)</label>
+        <input id="f-task" placeholder="e.g. finalize the customer-facing Q3 report draft">
+      </div>
       <button class="btn-primary" onclick="admitAgent()">+ Admit agent</button>
-      <span class="hint">Click any agent card below to open its cockpit: fire a syscall, acquire/release a resource, or force-kill it.</span>
+      <span class="hint">Click any agent card below to open its cockpit: fire a syscall, acquire/release a resource, or force-kill it. A task description is scored into a 0&ndash;1 task_value that can override static priority when picking a deadlock victim (semantic-value-aware resolution).</span>
+    </div>
+
+    <div class="cockpit" id="team-cockpit">
+      <div class="title">&#128640; Assemble a real team &mdash; roles and count decided live by an LLM</div>
+      <div class="field" style="flex:5 1 32rem; min-width:24rem;">
+        <label for="f-team-project">project idea</label>
+        <input id="f-team-project" placeholder="e.g. a simple to-do list app with add/remove/complete">
+      </div>
+      <button class="btn-primary" onclick="startTeam()">&#128640; Start team</button>
+      <span class="hint">One prompt. A real LLM planning call reads it and decides the team itself, how many agents (up to 5), what each is called, and who waits on whom, no fixed roles or fixed count. Each planned agent genuinely blocks on its dependencies' resource locks, reads their real output, then generates and writes its own. Watch it live in the agent cards and Wait-For Graph below; results land in the MCP workspace files list as team_&lt;name&gt;.md.</span>
+      <div id="team-plan" style="margin-top:0.5rem;"></div>
     </div>
 
     <div id="comparison-banner">
@@ -591,6 +607,7 @@
         <button class="btn-sm" onclick="fireSyscall('tool_call')">tool_call</button>
         <button class="btn-sm" onclick="fireSyscall('yield')">yield</button>
         <button class="btn-sm danger" onclick="killCurrent()">force kill</button>
+        <button class="btn-sm danger" onclick="interruptCurrent()" title="Cancels a real in-flight call immediately, not just PCB state">⚡ interrupt now</button>
       </div>
       <div id="d-syscall-result" class="mcp-result" hidden></div>
 
@@ -695,7 +712,7 @@ function renderAgents(agents, cpuId){
         <span class="aid">${STATE_ICON[a.state] || ''} ${esc(a.agent_id)}${isCpu ? '<span class="cpu-tag">CPU</span>' : ''}</span>
         <span class="state-badge state-${a.state}">${a.state}</span>
       </div>
-      <div class="meta">priority ${a.priority} &middot; parent ${a.parent_id ? esc(a.parent_id) : '—'} &middot; quota ${a.quota_used}/${a.quota_total}</div>
+      <div class="meta">priority ${a.priority} &middot; parent ${a.parent_id ? esc(a.parent_id) : '—'} &middot; quota ${a.quota_used}/${a.quota_total}${(a.task_value !== null && a.task_value !== undefined) ? ` &middot; <span title="LLM-scored task value -- can override priority in a deadlock">value ${a.task_value.toFixed(2)}</span>` : ''}</div>
       ${chips ? `<div class="res-chips">${chips}</div>` : ''}
     </div>`;
   }).join('');
@@ -1069,16 +1086,45 @@ async function admitAgent(){
   const agent_id = document.getElementById('f-agent-id').value.trim() || null;
   const priority = parseInt(document.getElementById('f-priority').value, 10) || 5;
   const quota_total = parseInt(document.getElementById('f-quota').value, 10) || 5;
+  const task_description = document.getElementById('f-task').value.trim() || null;
+  if (task_description) showToast('info', 'Scoring task...', 'Asking the LLM how costly losing this work would be -- this may take a moment.');
   const resp = await fetch('/api/admit', {
     method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ agent_id, priority, quota_total })
+    body: JSON.stringify({ agent_id, priority, quota_total, task_description })
   });
   const data = await resp.json();
   if (data.agent_id){
     document.getElementById('f-agent-id').value = '';
+    document.getElementById('f-task').value = '';
+    if (data.task_value !== null && data.task_value !== undefined) {
+      showToast('ok', `${data.agent_id}: task_value = ${data.task_value.toFixed(2)}`, 'Scored by a real LLM call -- this can outweigh static priority in a deadlock.');
+    }
     poll();
   } else if (data.error){
     alert('Could not admit agent: ' + data.error);
+  }
+}
+
+async function startTeam(){
+  const project = document.getElementById('f-team-project').value.trim();
+  if (!project){ alert('Enter a project idea first.'); return; }
+  const planDiv = document.getElementById('team-plan');
+  planDiv.textContent = 'Planning the team with a real LLM call...';
+  const resp = await fetch('/api/team/start', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ project })
+  });
+  const data = await resp.json();
+  if (data.started){
+    const rows = data.plan.map(a =>
+      `<b>${a.name}</b> -- ${a.task}${a.depends_on.length ? ' (waits on: ' + a.depends_on.join(', ') + ')' : ' (starts immediately)'}`
+    ).join('<br>');
+    planDiv.innerHTML = '<div class="hint">' + rows + '</div>';
+    showToast('info', `Team of ${data.plan.length} assembling...`, 'Roles decided live by the planner -- watch the agent cards and Wait-For Graph.');
+    poll();
+  } else if (data.error){
+    planDiv.textContent = '';
+    alert('Could not start team: ' + data.error);
   }
 }
 
@@ -1123,6 +1169,7 @@ async function refreshDrawer(){
     <div class="k">priority</div><div>${a.priority}</div>
     <div class="k">parent</div><div>${a.parent_id ? esc(a.parent_id) : '—'}</div>
     <div class="k">quota</div><div>${a.quota_used} / ${a.quota_total} (${a.quota_remaining} left)</div>
+    <div class="k">task_value</div><div>${(a.task_value !== null && a.task_value !== undefined) ? a.task_value.toFixed(2) + ' (LLM-scored)' : '— (none declared)'}</div>
     <div class="k">last updated</div><div>${new Date(a.updated_at * 1000).toLocaleTimeString()}</div>
   `;
 
@@ -1186,6 +1233,24 @@ async function killCurrent(){
     method: 'POST', headers: {'Content-Type':'application/json'},
     body: JSON.stringify({ agent_id: currentAgent })
   });
+  refreshDrawer(); poll();
+}
+
+async function interruptCurrent(){
+  if (!currentAgent) return;
+  const target = currentAgent;
+  const t0 = performance.now();
+  const resp = await fetch('/api/interrupt', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ agent_id: target, reason: 'live_demo_interrupt' })
+  });
+  const data = await resp.json();
+  const ms = (performance.now() - t0).toFixed(0);
+  const resultBox = document.getElementById('d-syscall-result');
+  resultBox.hidden = false;
+  resultBox.textContent = data.had_inflight_call
+    ? `⚡ Interrupted a REAL in-flight call in ${ms}ms.`
+    : `⚡ ${target} had nothing in flight -- killed anyway (${ms}ms).`;
   refreshDrawer(); poll();
 }
 

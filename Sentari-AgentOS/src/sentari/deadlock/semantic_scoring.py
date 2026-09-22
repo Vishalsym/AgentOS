@@ -19,6 +19,7 @@ Usage:
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 
 _SCORING_PROMPT = (
     "On a scale from 0.0 to 1.0, how costly would it be to lose all progress "
@@ -26,28 +27,61 @@ _SCORING_PROMPT = (
     "restarted from scratch by a different agent? 0.0 means trivially "
     "restartable with no real loss; 1.0 means severe, hard-to-recover loss "
     "(e.g. expensive research, a long multi-step process, or content a user "
-    "is actively waiting on). Respond with ONLY the number, nothing else.\n\n"
-    "Task: {task_description}"
+    "is actively waiting on).\n\n"
+    "Task: {task_description}\n\n"
+    "Respond with ONLY your final score, on its own line, formatted exactly "
+    "like this example (a decimal with two places, nothing else on that "
+    "line -- no words, no restating the scale, no explanation before or "
+    "after it):\n"
+    "SCORE: 0.73"
 )
 
-_NUMBER_RE = re.compile(r"(\d+(?:\.\d+)?)")
+# A genuine answer from this prompt is a decimal ("0.73"), and the model was
+# told to prefix it with "SCORE:". Real-world models frequently ignore
+# "respond with ONLY the number" and explain first -- often restating the
+# 0.0-1.0 scale itself, which used to get mistaken for the answer by a
+# naive "first number in the response" parse (the actual bug reported: two
+# very different tasks both scored 1, almost certainly because the model's
+# opening reasoning both times echoed a number from the scale/instructions,
+# not its real judgment). This parser now, in order of preference:
+#   1. looks for an explicit "SCORE: <number>" line,
+#   2. else takes the LAST decimal number in the response (a trailing
+#      conclusion is far more likely to be the real answer than a number
+#      mentioned while restating the question),
+#   3. else takes the LAST bare integer, as a last resort.
+_SCORE_LABEL_RE = re.compile(r"SCORE\s*:?\s*(\d+(?:\.\d+)?)", re.IGNORECASE)
+_DECIMAL_RE = re.compile(r"\d+\.\d+")
+_INTEGER_RE = re.compile(r"\d+")
 
 
 def _parse_score(raw: str) -> float:
-    match = _NUMBER_RE.search(raw)
-    if not match:
-        raise ValueError(f"could not parse a task-value score out of provider response: {raw!r}")
-    value = float(match.group(1))
-    return max(0.0, min(1.0, value))
+    labeled = _SCORE_LABEL_RE.findall(raw)
+    if labeled:
+        return max(0.0, min(1.0, float(labeled[-1])))
+    decimals = _DECIMAL_RE.findall(raw)
+    if decimals:
+        return max(0.0, min(1.0, float(decimals[-1])))
+    integers = _INTEGER_RE.findall(raw)
+    if integers:
+        return max(0.0, min(1.0, float(integers[-1])))
+    raise ValueError(f"could not parse a task-value score out of provider response: {raw!r}")
 
 
-async def score_task_value(provider, task_description: str) -> float:
+async def score_task_value(
+    provider,
+    task_description: str,
+    on_raw_response: Callable[[str], None] | None = None,
+) -> float:
     """Ask any `LLMProvider` (real or mock) to rate how costly losing this
-    task's progress would be, in [0.0, 1.0]. Robust to a provider that
-    doesn't answer with *only* a bare number (common in practice) by
-    extracting the first number in the response; if none is found, this
-    raises rather than silently guessing -- callers should treat a scoring
-    failure as "no opinion" (pass task_value=None) rather than fabricate one.
-    """
+    task's progress would be, in [0.0, 1.0]. If none of the parse
+    strategies above find a number, this raises rather than silently
+    guessing -- callers should treat a scoring failure as "no opinion"
+    (pass task_value=None) rather than fabricate one.
+
+    `on_raw_response`, if given, is called with the provider's exact raw
+    text (before parsing) -- useful to log/display for transparency or to
+    debug a bad score, without changing this function's return type."""
     response = await provider.complete(_SCORING_PROMPT.format(task_description=task_description))
+    if on_raw_response is not None:
+        on_raw_response(response)
     return _parse_score(response)

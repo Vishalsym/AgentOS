@@ -1,0 +1,5 @@
+.vscode/settings.json
+mcp_workspace/
+__pycache__/
+*.pyc
+.venv/
